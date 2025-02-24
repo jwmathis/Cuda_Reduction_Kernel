@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-
+#include <chrono>
 
 using namespace std;
 #define SHMEM_SIZE = 256 * 4; // Shared memory size
@@ -88,18 +88,12 @@ void intialize_vector(vector<int>& v, int n) {
 void launchReduceKernel(int* dev_array, int* dev_output, int array_size, int blockSize, int numBlocks) {
 
 	reduceKernel <<<numBlocks, blockSize, blockSize * sizeof(int)>>> (dev_array, dev_output, array_size);
-	cudaDeviceSynchronize();
 }
 
 int main() {
 	///-------------- Generate random array -------------///
-	// Initialize random number generator
 	uint64_t state[2] = { 123456789, 987654321 };
-
-	// Set array size
 	size_t array_size = 1024;
-	
-	// Generate random array
 	vector<int> random_array = genereateRandomArray(state, array_size);
 	//vector<int> random_array(array_size);
 	//intialize_vector(random_array, 1);
@@ -110,30 +104,40 @@ int main() {
 		cout << num << "\n";
 	}
 
-
 	///-------------- Memory allocation -------------///
 	int* dev_array; // Declare Device array
 	size_t size = array_size * sizeof(int); // Size of array
 	cudaError_t err = cudaMalloc(&dev_array, size); // Allocate memory for device variables
 	checkCudaError(err, "cudaMalloc failed!");
 
-	///-------------- Copy data from host to device -------------///
-	err = cudaMemcpy(dev_array, random_array.data(), size, cudaMemcpyHostToDevice); // Copy host data to device data
-	checkCudaError(err, "cudaMemcpy failed!");
-
-	// Allocate memory for the result on the device
 	int* dev_result;
 	err = cudaMalloc(&dev_result, sizeof(int) * ((array_size + 255) / 256));
 	checkCudaError(err, "cudaMalloc failed!");
 
+	///-------------- Copy data from host to device -------------///
+	err = cudaMemcpy(dev_array, random_array.data(), size, cudaMemcpyHostToDevice); // Copy host data to device data
+	checkCudaError(err, "cudaMemcpy failed!");
+
+
 	///-------------- Launch kernel -------------///
-	// Define grid and block dimensions
-	int blockSize = 512; // Number of threads per block
-	int numBlocks = (array_size + blockSize - 1) / blockSize; // Number of blocks
+	int blockSize = 256; // Number of threads per block
+	float elapsedTime = 0.0f;
+	for (int numBlocks = 1; numBlocks <= (array_size + blockSize - 1) / blockSize; numBlocks *= 2) {// Number of blocks
+		// Launch the kernel
+		cudaEvent_t start, stop;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
 
-	// Launch the kernel
-	launchReduceKernel(dev_array, dev_result, array_size, blockSize, numBlocks);
+		cudaEventRecord(start); // Start timing
+		launchReduceKernel(dev_array, dev_result, array_size, blockSize, numBlocks);
+		cudaEventRecord(stop); // Stop timing
 
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&elapsedTime, start, stop);
+
+		cout << "Grid Size: " << numBlocks << ", Block Size: " << blockSize << ", Execution Time: " << elapsedTime << " ms" << endl;
+		cudaEventDestroy(start);
+		cudaEventDestroy(stop);
 
 	///------------- Retrieve and verify result -------------///
 	vector<int> host_result(numBlocks);
@@ -147,19 +151,22 @@ int main() {
 
 	// Compute the result on the CPU
 	int cpu_result = 0;
+	auto cpu_start = chrono::high_resolution_clock::now();
 	for (const auto& num : random_array) {
 		cpu_result += num;
 	}
-
-	// Compare results
+	auto cpu_end = chrono::high_resolution_clock::now();
+	chrono::duration<float, std::milli> cpu_elapsed = cpu_end - cpu_start;
 	if (gpu_result == cpu_result) {
 		cout << "Results match! Sum: " << gpu_result << endl;
 	}
 	else {
 		cout << "Results do not match! GPU Sum: " << gpu_result << ", CPU Sum: " << cpu_result << endl;
 	}
+	cout << "CPU Execution Time: " << cpu_elapsed.count() << " ms" << endl;
 
-	// Free memory
+	}
+	///------------- Clean up -------------///
 	cudaFree(dev_array);
 	cudaFree(dev_result);
 	return 0;
