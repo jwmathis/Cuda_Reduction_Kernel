@@ -93,16 +93,16 @@ void launchReduceKernel(int* dev_array, int* dev_output, int array_size, int blo
 int main() {
 	///-------------- Generate random array -------------///
 	uint64_t state[2] = { 123456789, 987654321 };
-	size_t array_size = 1024;
+	size_t array_size = 4096;
 	vector<int> random_array = genereateRandomArray(state, array_size);
 	//vector<int> random_array(array_size);
 	//intialize_vector(random_array, 1);
 
 	//	Print random array
-	printf("Random Array: \n");
+	/*printf("Random Array: \n");
 	for (const auto& num : random_array) {
 		cout << num << "\n";
-	}
+	}*/
 
 	///-------------- Memory allocation -------------///
 	int* dev_array; // Declare Device array
@@ -122,7 +122,9 @@ int main() {
 	///-------------- Launch kernel -------------///
 	/// 
 	///-------------- Fixed Block Size, Varying Grid Size -------------///
-	int blockSize = 512; // Number of threads per block
+	cout << "Fixed Block Size, Varying Grid Size" << endl;
+	cout << "---------------------------------------" << endl;
+	int blockSize = 256; // Number of threads per block
 	float elapsedTime = 0.0f;
 	for (int numBlocks = 1; numBlocks <= (array_size + blockSize - 1) / blockSize; numBlocks *= 2) {// Number of blocks
 		// Launch the kernel
@@ -170,6 +172,8 @@ int main() {
 	}
 
 ///-------------- Fixed Grid Size, Varying Block Size -------------///
+	cout << "\nFixed Grid Size, Varying Block Size" << endl;
+	cout << "---------------------------------------" << endl;
 	int numBlocks = (array_size + 1024 - 1) / 1024;
 	for (int blockSize = 128; blockSize <= 1024; blockSize *= 2) {
 		// Launch the kernel
