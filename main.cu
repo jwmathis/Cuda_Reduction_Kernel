@@ -48,7 +48,7 @@ __global__ void reduceKernel(int* inputArray, int* outputArray, int arraySize) {
 
 	// Calculate thread index
 	int tid = blockIdx.x * blockDim.x + threadIdx.x; // Global index
-	int stride = blockDim.x * gridDim.x; // Stride
+	int stride = blockDim.x * gridDim.x; // Stride: step size which a thread progresses through the data it processes
 
 	// Intialize partial sum
 	int partial_sum = 0;
