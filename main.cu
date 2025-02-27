@@ -120,7 +120,9 @@ int main() {
 
 
 	///-------------- Launch kernel -------------///
-	int blockSize = 256; // Number of threads per block
+	/// 
+	///-------------- Fixed Block Size, Varying Grid Size -------------///
+	int blockSize = 512; // Number of threads per block
 	float elapsedTime = 0.0f;
 	for (int numBlocks = 1; numBlocks <= (array_size + blockSize - 1) / blockSize; numBlocks *= 2) {// Number of blocks
 		// Launch the kernel
@@ -139,33 +141,80 @@ int main() {
 		cudaEventDestroy(start);
 		cudaEventDestroy(stop);
 
-	///------------- Retrieve and verify result -------------///
-	vector<int> host_result(numBlocks);
-	cudaMemcpy(host_result.data(), dev_result, sizeof(int)*numBlocks, cudaMemcpyDeviceToHost);
+		///------------- Retrieve and verify result -------------///
+		vector<int> host_result(numBlocks);
+		cudaMemcpy(host_result.data(), dev_result, sizeof(int)*numBlocks, cudaMemcpyDeviceToHost);
 
-	// Perform final reduction on the CPU
-	int gpu_result = 0;
-	for (const auto& block_sum : host_result) {
-		gpu_result += block_sum;
+		// Perform final reduction on the CPU
+		int gpu_result = 0;
+		for (const auto& block_sum : host_result) {
+			gpu_result += block_sum;
+		}
+
+		// Compute the result on the CPU
+		int cpu_result = 0;
+		auto cpu_start = chrono::high_resolution_clock::now();
+		for (const auto& num : random_array) {
+			cpu_result += num;
+		}
+		auto cpu_end = chrono::high_resolution_clock::now();
+		chrono::duration<float, std::milli> cpu_elapsed = cpu_end - cpu_start;
+		if (gpu_result == cpu_result) {
+			cout << "Results match! Sum: " << gpu_result << endl;
+		}
+		else {
+			cout << "Results do not match! GPU Sum: " << gpu_result << ", CPU Sum: " << cpu_result << endl;
+		}
+		cout << "CPU Execution Time: " << cpu_elapsed.count() << " ms" << endl;
+
 	}
 
-	// Compute the result on the CPU
-	int cpu_result = 0;
-	auto cpu_start = chrono::high_resolution_clock::now();
-	for (const auto& num : random_array) {
-		cpu_result += num;
-	}
-	auto cpu_end = chrono::high_resolution_clock::now();
-	chrono::duration<float, std::milli> cpu_elapsed = cpu_end - cpu_start;
-	if (gpu_result == cpu_result) {
-		cout << "Results match! Sum: " << gpu_result << endl;
-	}
-	else {
-		cout << "Results do not match! GPU Sum: " << gpu_result << ", CPU Sum: " << cpu_result << endl;
-	}
-	cout << "CPU Execution Time: " << cpu_elapsed.count() << " ms" << endl;
+///-------------- Fixed Grid Size, Varying Block Size -------------///
+	int numBlocks = (array_size + 1024 - 1) / 1024;
+	for (int blockSize = 128; blockSize <= 1024; blockSize *= 2) {
+		// Launch the kernel
+		cudaEvent_t start, stop;
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
 
+		cudaEventRecord(start); // Start timing
+		launchReduceKernel(dev_array, dev_result, array_size, blockSize, numBlocks);
+		cudaEventRecord(stop); // Stop timing
+
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&elapsedTime, start, stop);
+
+		cout << "Grid Size: " << numBlocks << ", Block Size: " << blockSize << ", Execution Time: " << elapsedTime << " ms" << endl;
+		cudaEventDestroy(start);
+		cudaEventDestroy(stop);
+
+		///------------- Retrieve and verify result -------------///
+		vector<int> host_result(numBlocks);
+		cudaMemcpy(host_result.data(), dev_result, sizeof(int) * numBlocks, cudaMemcpyDeviceToHost);
+
+		// Perform final reduction on the CPU
+		int gpu_result = 0;
+		for (const auto& block_sum : host_result) {
+			gpu_result += block_sum;
+		}
+
+		// Compute the result on the CPU
+		int cpu_result = 0;
+		auto cpu_start = chrono::high_resolution_clock::now();
+		for (const auto& num : random_array) {
+			cpu_result += num;
+		}
+		auto cpu_end = chrono::high_resolution_clock::now();
+		chrono::duration<float, std::milli> cpu_elapsed = cpu_end - cpu_start;
+		if (gpu_result == cpu_result) {
+			cout << "Results match! Sum: " << gpu_result << endl;
+		}
+		else {
+			cout << "Results do not match! GPU Sum: " << gpu_result << ", CPU Sum: " << cpu_result << endl;
+		}
+		cout << "CPU Execution Time: " << cpu_elapsed.count() << " ms" << endl;
 	}
+
 	///------------- Clean up -------------///
 	cudaFree(dev_array);
 	cudaFree(dev_result);
