@@ -1,13 +1,13 @@
 #include <iostream>
 #include <vector>
 #include <cstdint>
+#include <chrono>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <chrono>
 
 using namespace std;
-#define SHMEM_SIZE = 256 * 4; // Shared memory size
-#define SIZE = 256;
+
+__global__ void reduceKernel(int* inputArray, int* outputArray, int arraySize);
 
 // Function to check for CUDA errors and print error messages
 void checkCudaError(cudaError_t err, const char* msg) {
@@ -19,70 +19,40 @@ void checkCudaError(cudaError_t err, const char* msg) {
 
 
 // xorshift128+ generator for random numbers
-int xorshift128plus(uint64_t s[2]) {
-	uint64_t x = s[0];
-	uint64_t y = s[1];
-	s[0] = y;
-	x ^= x << 23;
-	s[1] = x ^ y ^ (x >> 17) ^ (y >> 26);
-	uint64_t result =  s[1] + y;
+//int xorshift128plus(uint64_t s[2]) {
+//	uint64_t x = s[0];
+//	uint64_t y = s[1];
+//	s[0] = y;
+//	x ^= x << 23;
+//	s[1] = x ^ y ^ (x >> 17) ^ (y >> 26);
+//	uint64_t result =  s[1] + y;
+//
+//	// Cast to int (ensure it fits in the int range)
+//	return static_cast<int>(result & 0x7FFFFFFF); // Mask to ensure positive 32-bit int
+//}
 
-	// Cast to int (ensure it fits in the int range)
-	return static_cast<int>(result & 0x7FFFFFFF); // Mask to ensure positive 32-bit int
+int
+xoroshiro128plus(uint64_t s[2])
+{
+	uint64_t s0 = s[0];
+	uint64_t s1 = s[1];
+	uint64_t result = s0 + s1;
+	s1 ^= s0;
+	s[0] = ((s0 << 55) | (s0 >> 9)) ^ s1 ^ (s1 << 14);
+	s[1] = (s1 << 36) | (s1 >> 28);
+	return static_cast<int>(result & 0x7FFFFFFF);
 }
+
 
 // Generate random array using xorshift128+
 vector<int> genereateRandomArray(uint64_t s[2], size_t size) {
 	vector<int> random_array(size);
 
 	for (size_t i = 0; i < size; i++) {
-		random_array[i] = xorshift128plus(s);
+		random_array[i] = xoroshiro128plus(s);
 	}
 
 	return random_array;
-}
-
-// Define the kernel
-__global__ void reduceKernel(int* inputArray, int* outputArray, int arraySize) {
-	extern __shared__ int shared_sum[];
-
-	// Calculate thread index
-	int tid = blockIdx.x * blockDim.x + threadIdx.x; // Global index
-	int stride = blockDim.x * gridDim.x; // Stride: step size which a thread progresses through the data it processes
-
-	// Intialize partial sum
-	int partial_sum = 0;
-
-	// Perform reduction across threads
-	for (int i = tid; i < arraySize; i += stride) {
-		partial_sum += inputArray[i];
-	}
-
-	// Store partial sum in shared memory
-	shared_sum[threadIdx.x] = partial_sum;
-
-	// Synchronize threads
-	__syncthreads();
-
-	// Redeuce within the block
-	for (int i = blockDim.x / 2; i > 0; i /= 2) {
-		if (threadIdx.x < i) {
-			shared_sum[threadIdx.x] += shared_sum[threadIdx.x + i];
-		}
-
-		// Synchronize threads
-		__syncthreads();
-	}
-
-	if (threadIdx.x == 0) {
-		outputArray[blockIdx.x] = shared_sum[0];
-	}
-}
-
-void intialize_vector(vector<int>& v, int n) {
-	for (size_t i = 0; i < v.size(); i++) {
-		v[i] = n;
-	}
 }
 
 void launchReduceKernel(int* dev_array, int* dev_output, int array_size, int blockSize, int numBlocks) {
@@ -93,7 +63,7 @@ void launchReduceKernel(int* dev_array, int* dev_output, int array_size, int blo
 int main() {
 	///-------------- Generate random array -------------///
 	uint64_t state[2] = { 123456789, 987654321 };
-	size_t array_size = 4096;
+	size_t array_size = 8192;
 	vector<int> random_array = genereateRandomArray(state, array_size);
 	//vector<int> random_array(array_size);
 	//intialize_vector(random_array, 1);
@@ -105,19 +75,14 @@ int main() {
 	}*/
 
 	///-------------- Memory allocation -------------///
-	int* dev_array; // Declare Device array
-	size_t size = array_size * sizeof(int); // Size of array
-	cudaError_t err = cudaMalloc(&dev_array, size); // Allocate memory for device variables
-	checkCudaError(err, "cudaMalloc failed!");
-
+	int* dev_array;
 	int* dev_result;
-	err = cudaMalloc(&dev_result, sizeof(int) * ((array_size + 255) / 256));
-	checkCudaError(err, "cudaMalloc failed!");
+	size_t size = array_size * sizeof(int); // Size of array
+	checkCudaError((cudaMalloc(&dev_array, size)), "cudaMalloc failed!");
+	checkCudaError((cudaMalloc(&dev_result, sizeof(int) * ((array_size + 255) / 256))), "cudaMalloc failed!");
 
 	///-------------- Copy data from host to device -------------///
-	err = cudaMemcpy(dev_array, random_array.data(), size, cudaMemcpyHostToDevice); // Copy host data to device data
-	checkCudaError(err, "cudaMemcpy failed!");
-
+	checkCudaError((cudaMemcpy(dev_array, random_array.data(), size, cudaMemcpyHostToDevice)), "cudaMemcpy failed!");
 
 	///-------------- Launch kernel -------------///
 	/// 
